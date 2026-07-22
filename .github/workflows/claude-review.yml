@@ -27,6 +27,12 @@ jobs:
   review:
     name: Claude review
     runs-on: ubuntu-latest
+    # Gate behind the 'claude-review' environment: a maintainer (the engineering
+    # team is a required reviewer on it) must approve the run before this
+    # credentialed review executes on a PR. Unlike the fork-PR approval gate —
+    # which only holds pull_request runs — this is what holds a pull_request_target
+    # job for approval.
+    environment: claude-review
     permissions:
       contents: read # reads the base checkout only
       pull-requests: write # posts the advisory review comment
