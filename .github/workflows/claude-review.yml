@@ -9,6 +9,9 @@ name: Claude review
 # (.github/workflows/claude-coreteam-review-shared.yml) instead of the public
 # action below.
 on:
+  # zizmor: ignore[dangerous-triggers] — intentional: needs write to comment on
+  # fork PRs. Runs in BASE context, checks out the base ref with no persisted
+  # credentials, and never runs any fork code (the prompt forbids it).
   pull_request_target:
     types: [opened, synchronize, reopened]
     paths:
