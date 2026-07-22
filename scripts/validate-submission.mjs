@@ -10,8 +10,8 @@
 // --changed <file>: a file of newline-separated changed paths (from `git diff
 //   --name-only base...head`). A genuine submission PR (the automated
 //   share-to-gallery flow, or a hand-made one following the same rule) never
-//   touches anything but its own apps/<dir>/recording.json and, optionally,
-//   thumbnail.png — so that's the shape this validator enforces. A PR that
+//   touches anything but its own apps/<dir>/recording.json and, optionally, a
+//   thumbnail image — so that's the shape this validator enforces. A PR that
 //   touches anything else (repo maintenance, workflow/docs changes, the
 //   initial template setup) isn't submission-shaped; this script has nothing
 //   to check for it and exits 0, deferring to the repo's normal required
@@ -52,7 +52,7 @@ if (opts.changedFile) {
   const { dirs: touched, malformed, unrelated } = submissionDirsFromPaths(paths);
   if (malformed.length > 0) {
     fail([
-      "A submission PR may only add files under apps/<login>_<app>/ (recording.json and optionally thumbnail.png).",
+      "A submission PR may only add files under apps/<login>_<app>/ (recording.json and optionally a thumbnail image — png, jpg, or webp).",
       "Disallowed paths under apps/:",
       ...malformed.map((p) => `  - ${p}`),
     ]);
