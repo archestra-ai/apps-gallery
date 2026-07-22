@@ -13,12 +13,18 @@ name: Validate submission
 on:
   pull_request:
 
-permissions:
-  contents: read
+permissions: {} # deny-all baseline; the job grants only what it needs
+
+concurrency:
+  group: validate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   validate:
+    name: Validate submission
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # read-only: only reads the PR's files to validate them
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

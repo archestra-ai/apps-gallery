@@ -17,9 +17,7 @@ on:
     paths:
       - "apps/**"
 
-permissions:
-  contents: read
-  pull-requests: write
+permissions: {} # deny-all baseline; the job grants only what it needs
 
 concurrency:
   group: claude-review-${{ github.event.pull_request.number }}
@@ -27,7 +25,11 @@ concurrency:
 
 jobs:
   review:
+    name: Claude review
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # reads the base checkout only
+      pull-requests: write # posts the advisory review comment
     steps:
       - name: Detect credential
         id: cred
