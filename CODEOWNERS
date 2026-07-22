@@ -1,0 +1,8 @@
+# The Archestra engineering team owns the entire repository. Every file —
+# including every submission under apps/ — requires a code-owner review before
+# merge. Combined with branch protection ("Require review from Code Owners"),
+# this stops anyone outside the team from merging a PR.
+#
+# See .github/BRANCH_PROTECTION.md for the one-time protection setup, and keep
+# .github/reviewers.json (the round-robin auto-assign pool) in step with this.
+* @archestra-ai/engineering

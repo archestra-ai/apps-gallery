@@ -1,0 +1,51 @@
+name: Submission governance
+
+# Needs write (assign reviewer, comment) so it runs on pull_request_target, which
+# executes with the BASE repo's context and secrets. It checks out the BASE ref
+# and only ever reads PR metadata via the API — it never checks out or runs any
+# code from the fork.
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  governance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4 # base ref (trusted) — governance scripts + reviewers.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Enforce one open PR per author
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          count=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --json author \
+            | jq --arg author "$AUTHOR" '[.[] | select(.author.login == $author)] | length')
+          echo "Open PRs by $AUTHOR: $count"
+          if [ "$count" -gt 1 ]; then
+            gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body \
+              "Thanks for submitting! You already have an open submission PR — please land or close it before opening another. Only one open submission per person at a time."
+            echo "::error::Author $AUTHOR has more than one open PR."
+            exit 1
+          fi
+
+      - name: Auto-assign a round-robin reviewer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          reviewer=$(node scripts/ci/pick-reviewer.mjs "$PR" "$AUTHOR")
+          echo "Chosen reviewer: ${reviewer:-<none>}"
+          if [ -n "$reviewer" ]; then
+            gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --add-reviewer "$reviewer" || \
+              echo "::warning::Could not add reviewer $reviewer (maybe not a collaborator)."
+          fi

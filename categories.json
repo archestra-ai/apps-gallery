@@ -1,0 +1,11 @@
+{
+  "$comment": "Canonical Apps Hackathon gallery categories, documentation for submitters. Mirrors platform/shared/app-gallery-categories.ts in archestra-ai/archestra, which the upload dropdown offers plus a free-text \"Other\". The validator here accepts any non-empty, sanitized category (including custom \"Other\" values), so drift never blocks a submission.",
+  "categories": [
+    "Games & Experiments",
+    "Workflows",
+    "Data & Dashboards",
+    "Productivity",
+    "Creative & Design",
+    "Developer Tools"
+  ]
+}

@@ -1,0 +1,158 @@
+{
+  "formatVersion": 1,
+  "app": {
+    "id": null,
+    "name": "Example App"
+  },
+  "recording": {
+    "title": "Example App demo",
+    "startedAt": "2026-07-22T00:00:00.000Z",
+    "durationMs": 12000,
+    "events": [
+      {
+        "kind": "viewport",
+        "t": 0,
+        "width": 800,
+        "height": 1000
+      },
+      {
+        "kind": "pointer",
+        "t": 500,
+        "type": "move",
+        "x": 120,
+        "y": 240
+      },
+      {
+        "kind": "pointer",
+        "t": 640,
+        "type": "down",
+        "x": 120,
+        "y": 240,
+        "button": 0
+      },
+      {
+        "kind": "pointer",
+        "t": 700,
+        "type": "click",
+        "x": 120,
+        "y": 240,
+        "button": 0
+      },
+      {
+        "kind": "key",
+        "t": 1000,
+        "type": "down",
+        "key": "ArrowUp",
+        "code": "ArrowUp"
+      },
+      {
+        "kind": "key",
+        "t": 1120,
+        "type": "up",
+        "key": "ArrowUp",
+        "code": "ArrowUp"
+      },
+      {
+        "kind": "input",
+        "t": 1500,
+        "selector": "#name",
+        "value": "hello"
+      },
+      {
+        "kind": "scroll",
+        "t": 1800,
+        "selector": null,
+        "x": 0,
+        "y": 0
+      },
+      {
+        "kind": "mcp",
+        "t": 2200,
+        "method": "tools/call",
+        "toolName": "example__do_thing",
+        "params": {
+          "n": 1
+        },
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "ok"
+            }
+          ]
+        },
+        "isError": false,
+        "durationMs": 14
+      },
+      {
+        "kind": "dom",
+        "t": 2600,
+        "op": "html",
+        "sel": "#score",
+        "html": "<span id=\"score\">11</span>"
+      },
+      {
+        "kind": "segment",
+        "t": 0,
+        "version": 1
+      }
+    ],
+    "segments": [
+      {
+        "version": 1,
+        "html": "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Example App</title><style>body{font-family:system-ui,sans-serif;margin:0;height:100vh;display:grid;place-items:center;background:#0f172a;color:#e2e8f0}main{text-align:center}h1{margin:0 0 .5rem;font-size:1.5rem}#score{font-variant-numeric:tabular-nums;color:#38bdf8}button{margin-top:1rem;padding:.5rem 1rem;border:0;border-radius:.5rem;background:#38bdf8;color:#0f172a;font-weight:600;cursor:pointer}</style></head><body><main><h1>Example App</h1><p>Score: <span id=\"score\">10</span></p><button id=\"go\">Do a thing</button></main><script>document.getElementById('go').addEventListener('click',()=>{const s=document.getElementById('score');s.textContent=String(Number(s.textContent)+1);});</script></body></html>",
+        "atMs": 0
+      }
+    ],
+    "transcript": [
+      {
+        "id": "u1",
+        "role": "user",
+        "atMs": 0,
+        "parts": [
+          {
+            "type": "text",
+            "text": "Build me a tiny example app with a score I can bump."
+          }
+        ]
+      },
+      {
+        "id": "a1",
+        "role": "assistant",
+        "atMs": 2000,
+        "parts": [
+          {
+            "type": "text",
+            "text": "Here's a minimal example app — click the button to raise the score."
+          },
+          {
+            "type": "tool",
+            "name": "example__do_thing"
+          }
+        ]
+      }
+    ]
+  },
+  "enhancement": {
+    "description": "A tiny example app that bumps a score when you click — the placeholder submission that documents the gallery folder layout.",
+    "prompt": "Build me a tiny example app that shows a score and a button; clicking the button increases the score by one. Keep it a single self-contained HTML file.",
+    "response": "Here's a minimal example app with a score and a button that increments it.",
+    "category": "Developer Tools"
+  },
+  "meta": {
+    "authorName": "Mark Novikov",
+    "createdAt": "2026-07-22T00:00:00.000Z",
+    "platform": "archestra",
+    "mcpServers": [
+      "example"
+    ],
+    "appVersionCount": 1,
+    "github": {
+      "login": "piercypixel",
+      "name": "Mark Novikov"
+    },
+    "model": "Claude Sonnet",
+    "userPromptCount": 1,
+    "finalCutDurationMs": 12000
+  }
+}

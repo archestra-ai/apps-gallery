@@ -1,0 +1,4 @@
+{
+  "$comment": "Round-robin reviewer pool for auto-assignment (scripts/lib/governance.mjs chooseReviewer). Mirrors the @archestra-ai/engineering CODEOWNERS team; keep in step as membership changes.",
+  "reviewers": ["divineforest", "iskhakov", "joeyorlando", "piercypixel", "Konstantinov-Innokentii"]
+}

@@ -1,0 +1,53 @@
+name: Publish gallery index
+
+# Rebuild the lightweight index.json and publish it to the `gallery-index` branch
+# (NOT protected main — avoids fighting branch protection).
+#
+# Runs on ANY merge to main, not only new submissions under apps/. A submission
+# adds an app, but a fix to the validator, the vendored schema, or the build
+# script changes how EXISTING submissions are indexed — a bundle that was wrongly
+# rejected (and so silently dropped from the manifest) now validates. An infra/CI
+# fix must therefore be able to self-heal the published index on its own merge,
+# rather than waiting for the next unrelated submission to retrigger the build.
+#
+# Safe to run broadly: build-index is deterministic, so a no-op merge just
+# republishes byte-identical content, and the publish step pushes to the
+# gallery-index branch (never main), so this workflow can't retrigger itself.
+# workflow_dispatch adds an on-demand manual rebuild.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-gallery-index
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci --ignore-scripts
+      - run: node scripts/build-index.mjs --out index.json
+
+      - name: Publish index.json to gallery-index
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          work=$(mktemp -d)
+          cp index.json "$work/index.json"
+          cd "$work"
+          git init -q
+          git config user.name "archestra-gallery-bot"
+          git config user.email "gallery-bot@users.noreply.github.com"
+          git checkout -q -b gallery-index
+          git add index.json
+          git commit -q -m "Publish gallery index"
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gallery-index

@@ -1,0 +1,55 @@
+name: Claude review
+
+# Advisory Claude review of a submission. Runs on pull_request_target (base
+# context) so it can comment, and is restricted to reading the PR via `gh` +
+# Read only — it never runs any code from the fork. Inert until a Claude
+# credential (CLAUDE_CODE_OAUTH_TOKEN) is configured on the repo.
+#
+# On the org repo, prefer calling the shared reusable workflow
+# (.github/workflows/claude-coreteam-review-shared.yml) instead of the public
+# action below.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "apps/**"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Detect credential
+        id: cred
+        env:
+          TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -n "$TOKEN" ]; then echo "present=true" >> "$GITHUB_OUTPUT"; else echo "present=false" >> "$GITHUB_OUTPUT"; echo "No CLAUDE_CODE_OAUTH_TOKEN secret; skipping Claude review."; fi
+
+      - name: Checkout base (no persisted credentials, no fork code)
+        if: steps.cred.outputs.present == 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Review with Claude
+        if: steps.cred.outputs.present == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Review app-gallery submission PR #${{ github.event.pull_request.number }} in ${{ github.repository }}.
+            A submission adds exactly one apps/<login>_<slug>/recording.json (and optionally thumbnail.png).
+            Inspect it with `gh pr diff` / `gh pr view`. Comment briefly on: does the app look like a genuine
+            hackathon app; are the description, one-shot prompt, and category sensible and safe; anything off
+            (spam, offensive content, mismatched author). Do NOT run any code from the PR.
+          claude_args: "--allowedTools Read,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+          use_sticky_comment: "true"

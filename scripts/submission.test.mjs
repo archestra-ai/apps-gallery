@@ -1,0 +1,159 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import {
+  slugify,
+  expectedDirName,
+  submissionDirsFromPaths,
+  validateSubmission,
+  deriveIndexEntry,
+} from "./lib/submission.mjs";
+import { validateBundle } from "../schema/app-recording-bundle.mjs";
+import { chooseReviewer } from "./lib/governance.mjs";
+
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const EXAMPLE_DIR = "piercypixel_example_app";
+// A real Archestra bundle kept as a test fixture (apps/ ships empty in this repo,
+// so the example lives here rather than as a committed submission).
+const EXAMPLE_FIXTURE = join(repoRoot, "scripts", "__fixtures__", "example-recording.json");
+const exampleBundle = () => JSON.parse(readFileSync(EXAMPLE_FIXTURE, "utf8"));
+
+test("slugify mirrors the platform (underscores, trimmed)", () => {
+  assert.equal(slugify("Archestra Snake 3310"), "archestra_snake_3310");
+  assert.equal(slugify("  Hello, World!  "), "hello_world");
+  assert.equal(slugify("Example App"), "example_app");
+});
+
+test("expectedDirName is <login>_<slug>", () => {
+  assert.equal(expectedDirName("octocat", "Example App"), "octocat_example_app");
+  assert.equal(expectedDirName("piercypixel", "Archestra Snake 3310"), "piercypixel_archestra_snake_3310");
+});
+
+test("submissionDirsFromPaths accepts only the two files under one folder", () => {
+  const ok = submissionDirsFromPaths([
+    "apps/octocat_example_app/recording.json",
+    "apps/octocat_example_app/thumbnail.png",
+  ]);
+  assert.deepEqual(ok.dirs, ["octocat_example_app"]);
+  assert.deepEqual(ok.malformed, []);
+  assert.deepEqual(ok.unrelated, []);
+});
+
+test("submissionDirsFromPaths separates a smuggled extra file under apps/ from merely unrelated repo files", () => {
+  const mixed = submissionDirsFromPaths([
+    "apps/octocat_example_app/recording.json",
+    "scripts/validate-submission.mjs", // repo maintenance — not apps/-prefixed
+    "apps/octocat_example_app/evil.sh", // apps/-prefixed but not an allowed filename
+  ]);
+  assert.deepEqual(mixed.dirs, ["octocat_example_app"]);
+  // A file smuggled into an otherwise-legit submission folder is always
+  // suspicious, regardless of what else changed — it must never be
+  // downgraded to "just unrelated maintenance."
+  assert.deepEqual(mixed.malformed, ["apps/octocat_example_app/evil.sh"]);
+  assert.deepEqual(mixed.unrelated, ["scripts/validate-submission.mjs"]);
+});
+
+test("chooseReviewer is deterministic and distributes", () => {
+  const owners = ["a", "b", "c"];
+  assert.equal(chooseReviewer(owners, 7), "b"); // 7 % 3 = 1
+  assert.equal(chooseReviewer(owners, 7), "b"); // stable
+  assert.equal(chooseReviewer(owners, 9), "a"); // 9 % 3 = 0
+  assert.equal(chooseReviewer([], 3), null);
+});
+
+test("chooseReviewer advances past the PR's own author instead of dropping the assignment", () => {
+  const owners = ["a", "b", "c"];
+  // 9 % 3 = 0 -> "a" is the raw pick; excluding "a" advances to "b".
+  assert.equal(chooseReviewer(owners, 9, "a"), "b");
+  // A non-matching exclude never changes the pick.
+  assert.equal(chooseReviewer(owners, 9, "z"), "a");
+  // Every owner excluded (single-maintainer pool submitting their own PR) -> no reviewer.
+  assert.equal(chooseReviewer(["a"], 9, "a"), null);
+});
+
+test("contract: the committed example bundle validates against the vendored schema", () => {
+  const res = validateBundle(exampleBundle());
+  assert.equal(res.ok, true, res.ok ? "" : res.error);
+});
+
+test("contract: a bundle carrying audio events (current client) validates", () => {
+  // The recorder mixes in an opus audio track: one audio-config then a stream
+  // of audio-chunks. These arrive interleaved among the video events, so the
+  // vendored schema must know both kinds or the whole bundle is rejected.
+  const b = exampleBundle();
+  b.recording.events.push(
+    { kind: "audio-config", t: 10, codec: "opus", sampleRate: 48000, numberOfChannels: 2, description: "T3B1c0hlYWQ=" },
+    { kind: "audio-chunk", t: 10, tsUs: 66101243003, data: "AAAA" },
+  );
+  const res = validateBundle(b);
+  assert.equal(res.ok, true, res.ok ? "" : res.error);
+});
+
+test("contract: the example fixture passes full submission validation", () => {
+  const dir = writeTemp(exampleBundle(), EXAMPLE_DIR);
+  const res = validateSubmission({ appsDir: dir.appsDir, dirName: dir.name });
+  assert.equal(res.ok, true, res.errors.join("\n"));
+  assert.equal(res.entry.appName, "Example App");
+  assert.equal(res.entry.category, "Developer Tools");
+  assert.equal(res.entry.author.login, "piercypixel");
+  assert.equal(res.entry.durationSeconds, 12);
+});
+
+test("deriveIndexEntry: final-cut duration wins; userPromptCount falls back to transcript", () => {
+  const b = exampleBundle();
+  delete b.meta.userPromptCount; // force the transcript fallback
+  b.meta.finalCutDurationMs = 8000;
+  b.recording.durationMs = 999999; // raw is ignored when finalCut is present
+  const e = deriveIndexEntry({ dirName: EXAMPLE_DIR, bundle: b });
+  assert.equal(e.durationSeconds, 8);
+  assert.equal(e.userPromptCount, 1); // one role:"user" message
+  assert.equal(e.author.name, "Mark Novikov");
+});
+
+test("schema is strict: unknown meta keys are rejected", () => {
+  const b = exampleBundle();
+  b.meta.sneaky = "payload";
+  assert.equal(validateBundle(b).ok, false);
+});
+
+test("playability: a bundle with no non-empty segment HTML is rejected by submission validation", () => {
+  const b = exampleBundle();
+  b.recording.segments = [{ version: 1, html: "", atMs: 0 }];
+  const dir = writeTemp(b, "octocat_example_app");
+  const res = validateSubmission({ appsDir: dir.appsDir, dirName: dir.name });
+  assert.equal(res.ok, false);
+  assert.ok(res.errors.some((e) => /non-empty app HTML/.test(e)), res.errors.join("\n"));
+});
+
+test("category sanitize: a category with angle brackets is rejected, spaces & ampersands pass", () => {
+  const bad = exampleBundle();
+  bad.enhancement.category = "<script>";
+  const d1 = writeTemp(bad, "octocat_example_app");
+  assert.equal(validateSubmission({ appsDir: d1.appsDir, dirName: d1.name }).ok, false);
+
+  const good = exampleBundle();
+  good.enhancement.category = "Games & Experiments";
+  const d2 = writeTemp(good, "octocat_example_app");
+  assert.equal(validateSubmission({ appsDir: d2.appsDir, dirName: d2.name }).ok, true);
+});
+
+test("content: folder must match <login>_<slug(appName)>", () => {
+  const b = exampleBundle();
+  const dir = writeTemp(b, "octocat_wrong_name");
+  const res = validateSubmission({ appsDir: dir.appsDir, dirName: dir.name });
+  assert.equal(res.ok, false);
+  assert.ok(res.errors.some((e) => /folder name must be/.test(e)));
+});
+
+// --- helper: write a bundle to a throwaway apps/<dir>/recording.json ---
+function writeTemp(bundle, dirName) {
+  const root = mkdtempSync(join(tmpdir(), "gallery-test-"));
+  const appsDir = join(root, "apps");
+  mkdirSync(join(appsDir, dirName), { recursive: true });
+  writeFileSync(join(appsDir, dirName, "recording.json"), JSON.stringify(bundle));
+  return { appsDir, name: dirName };
+}

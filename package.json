@@ -1,0 +1,21 @@
+{
+  "name": "app-gallery",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Archestra Apps Hackathon — app-session gallery submissions.",
+  "repository": { "type": "git", "url": "git+https://github.com/archestra-ai/apps-gallery.git" },
+  "license": "MIT",
+  "scripts": {
+    "validate": "node scripts/validate-submission.mjs",
+    "validate:all": "node scripts/validate-submission.mjs --all",
+    "build-index": "node scripts/build-index.mjs",
+    "test": "node --test scripts/*.test.mjs"
+  },
+  "dependencies": {
+    "zod": "^3.24.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
