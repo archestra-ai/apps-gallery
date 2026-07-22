@@ -58,7 +58,9 @@ the app slug. One folder per app; re-sharing the same app updates the same PR.
   `recording.json` against the [bundle schema](./schema/app-recording-bundle.mjs),
   plus playability, category, and thumbnail. Runs on `pull_request` and never
   executes anything from the PR.
-- **Review**: a maintainer is auto-assigned (round-robin) to your submission.
+- **Review**: a maintainer is auto-assigned (round-robin), and when a submission
+  includes a thumbnail, its cover image, description, and build prompt are posted
+  to the PR for a quick look.
 - **Owner approval gates everything.** Only a maintainer can approve, and by repo
   policy PR workflows for outside contributors run only after a maintainer
   approves. Merges require a maintainer (code-owner) review; nobody else can merge.

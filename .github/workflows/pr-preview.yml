@@ -1,0 +1,84 @@
+name: PR preview
+
+# When a submission carries a thumbnail, surface it on the PR: post the cover
+# image plus the app's description and build prompt (read from recording.json)
+# into a managed block in the PR body, so a reviewer sees what's being submitted
+# without opening the bundle.
+#
+# Needs write (edit the PR body) so it runs on pull_request_target, in the BASE
+# repo's context. It checks out the base ref for its own scripts and only ever
+# reads PR metadata + the bundle JSON via the API — it never checks out or runs
+# any code from the fork.
+on:
+  # zizmor: ignore[dangerous-triggers] — intentional: needs write to edit the PR
+  # body on fork PRs. Runs in BASE context, checks out the base ref with no
+  # persisted credentials, and never runs any fork code (it only parses the
+  # submission's recording.json as data).
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+    paths:
+      - "apps/**"
+
+permissions: {} # deny-all baseline; the job grants only what it needs
+
+concurrency:
+  group: pr-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    name: PR preview
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write # edit the submission PR body with the preview block
+    steps:
+      # base ref (trusted): the preview scripts, never fork code.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+
+      - name: Post thumbnail, description, and prompt to the PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          # Fork coordinates, passed via env (never inlined into the script) so a
+          # crafted repo/branch name can't be interpreted as shell.
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          # Changed files (base-context metadata only — no fork checkout).
+          paths=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json files --jq '.files[].path')
+
+          # Only submissions with a thumbnail get a preview; that's the trigger.
+          thumb=$(printf '%s\n' "$paths" | grep -E '^apps/[^/]+/thumbnail\.(png|jpg|jpeg|webp)$' | head -n1 || true)
+          if [ -z "$thumb" ]; then
+            echo "No thumbnail in this PR; nothing to preview."
+            exit 0
+          fi
+
+          dir=$(printf '%s' "$thumb" | cut -d/ -f2)
+          recording="apps/$dir/recording.json"
+          if ! printf '%s\n' "$paths" | grep -qxF "$recording"; then
+            echo "Thumbnail present but no recording.json alongside it; skipping."
+            exit 0
+          fi
+
+          # Pull the bundle JSON as data (raw media type handles bundles >1MB) and
+          # build the thumbnail's commit-pinned raw URL. Neither is executed.
+          gh api "repos/$HEAD_REPO/contents/$recording?ref=$HEAD_SHA" \
+            -H "Accept: application/vnd.github.raw" > recording.json
+          thumb_url="https://github.com/$HEAD_REPO/raw/$HEAD_SHA/$thumb"
+
+          # Merge the preview block into the author's existing body, preserving it.
+          PR_BODY=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json body --jq '.body // ""')
+          export PR_BODY
+          node scripts/ci/pr-preview.mjs recording.json "$thumb_url" > body.md
+
+          gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --body-file body.md
+          echo "Updated PR #$PR with the app preview (thumbnail: $thumb)."
