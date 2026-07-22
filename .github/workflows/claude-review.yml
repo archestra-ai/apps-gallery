@@ -9,14 +9,15 @@ name: Claude review
 # (.github/workflows/claude-coreteam-review-shared.yml) instead of the public
 # action below.
 on:
+  # zizmor: ignore[dangerous-triggers] — intentional: needs write to comment on
+  # fork PRs. Runs in BASE context, checks out the base ref with no persisted
+  # credentials, and never runs any fork code (the prompt forbids it).
   pull_request_target:
     types: [opened, synchronize, reopened]
     paths:
       - "apps/**"
 
-permissions:
-  contents: read
-  pull-requests: write
+permissions: {} # deny-all baseline; the job grants only what it needs
 
 concurrency:
   group: claude-review-${{ github.event.pull_request.number }}
@@ -24,7 +25,11 @@ concurrency:
 
 jobs:
   review:
+    name: Claude review
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # reads the base checkout only
+      pull-requests: write # posts the advisory review comment
     steps:
       - name: Detect credential
         id: cred
@@ -35,14 +40,14 @@ jobs:
 
       - name: Checkout base (no persisted credentials, no fork code)
         if: steps.cred.outputs.present == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 1
           persist-credentials: false
 
       - name: Review with Claude
         if: steps.cred.outputs.present == 'true'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@fa7e2f0a29a126f0b81cdcf360561b36e44cf608 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |

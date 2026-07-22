@@ -5,33 +5,49 @@ name: Validate submission
 # path shape (a smuggled file under apps/ always fails; unrelated files are
 # fine as long as any apps/ submission present still validates strictly),
 # so the validator + its deps are always the base repo's unmodified copies.
+#
+# Runs on every PR (not only apps/** ones) so it can be a required status check:
+# a non-submission PR (repo maintenance) carries nothing under apps/, and the
+# validator exits 0 for it, so the check passes trivially instead of staying
+# pending and blocking the merge.
 on:
   pull_request:
-    paths:
-      - "apps/**"
 
-permissions:
-  contents: read
+permissions: {} # deny-all baseline; the job grants only what it needs
+
+concurrency:
+  group: validate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
+  # Job name kept as "validate" so the required status-check context matches
+  # branch protection (see .github/BRANCH_PROTECTION.md).
   validate:
+    name: validate
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # read-only: only reads the PR's files to validate them
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Compute changed files
+        # Pass the branch name through the environment, never inline into the
+        # shell — a ${{ }} expansion of a ref name is a template-injection sink.
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          git fetch --no-tags origin "${{ github.base_ref }}"
+          git fetch --no-tags origin "$BASE_REF"
           # --diff-filter=d excludes deletions: removing a stray file (e.g. a
           # leftover .gitkeep) is never the "smuggled extra file" risk the
           # shape check below guards against, and git diff --name-only would
           # otherwise list a deleted path the exact same way as an added one.
-          git diff --name-only --diff-filter=d "origin/${{ github.base_ref }}...HEAD" > /tmp/changed.txt
+          git diff --name-only --diff-filter=d "origin/$BASE_REF...HEAD" > /tmp/changed.txt
           echo "Changed files:"; cat /tmp/changed.txt
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
 
@@ -39,4 +55,8 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Validate the submission
-        run: node scripts/validate-submission.mjs --changed /tmp/changed.txt --author "${{ github.event.pull_request.user.login }}"
+        # Same reason: the PR author login reaches the script via the environment,
+        # not spliced into the command line.
+        env:
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: node scripts/validate-submission.mjs --changed /tmp/changed.txt --author "$AUTHOR"

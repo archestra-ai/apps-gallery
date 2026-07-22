@@ -5,19 +5,31 @@ name: Submission governance
 # and only ever reads PR metadata via the API — it never checks out or runs any
 # code from the fork.
 on:
+  # zizmor: ignore[dangerous-triggers] — intentional: needs write to comment/assign
+  # on fork PRs. Runs in BASE context, checks out the base ref, and only reads PR
+  # metadata via the API; it never checks out or runs any fork code (see below).
   pull_request_target:
     types: [opened, reopened, synchronize]
 
-permissions:
-  pull-requests: write
+permissions: {} # deny-all baseline; the job grants only what it needs
+
+concurrency:
+  group: governance-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   governance:
+    name: Submission governance
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write # comment on and assign a reviewer to the submission PR
     steps:
-      - uses: actions/checkout@v4 # base ref (trusted) — governance scripts + reviewers.json
+      # base ref (trusted): governance scripts + reviewers.json, never fork code.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
 
