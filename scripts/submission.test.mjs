@@ -43,6 +43,24 @@ test("submissionDirsFromPaths accepts only the two files under one folder", () =
   assert.deepEqual(ok.unrelated, []);
 });
 
+test("submissionDirsFromPaths accepts a WebP (or jpg) thumbnail, not just PNG", () => {
+  const webp = submissionDirsFromPaths([
+    "apps/octocat_example_app/recording.json",
+    "apps/octocat_example_app/thumbnail.webp",
+  ]);
+  assert.deepEqual(webp.dirs, ["octocat_example_app"]);
+  assert.deepEqual(webp.malformed, []);
+
+  const jpg = submissionDirsFromPaths(["apps/octocat_example_app/thumbnail.jpg"]);
+  assert.deepEqual(jpg.dirs, ["octocat_example_app"]);
+  assert.deepEqual(jpg.malformed, []);
+
+  // A non-image extension is still smuggled cargo, not a thumbnail.
+  const bad = submissionDirsFromPaths(["apps/octocat_example_app/thumbnail.gif"]);
+  assert.deepEqual(bad.dirs, []);
+  assert.deepEqual(bad.malformed, ["apps/octocat_example_app/thumbnail.gif"]);
+});
+
 test("submissionDirsFromPaths separates a smuggled extra file under apps/ from merely unrelated repo files", () => {
   const mixed = submissionDirsFromPaths([
     "apps/octocat_example_app/recording.json",
@@ -149,6 +167,22 @@ test("content: folder must match <login>_<slug(appName)>", () => {
   assert.ok(res.errors.some((e) => /folder name must be/.test(e)));
 });
 
+test("thumbnail: a WebP thumbnail (the client's canvas/video format) validates and keeps its .webp path", () => {
+  const dir = writeTemp(exampleBundle(), "octocat_example_app");
+  writeFileSync(join(dir.appsDir, dir.name, "thumbnail.webp"), webpLossless(320, 400));
+  const res = validateSubmission({ appsDir: dir.appsDir, dirName: dir.name });
+  assert.equal(res.ok, true, res.errors.join("\n"));
+  assert.equal(res.entry.thumbnailPath, `apps/${dir.name}/thumbnail.webp`);
+});
+
+test("thumbnail: an undersized image is rejected regardless of format", () => {
+  const dir = writeTemp(exampleBundle(), "octocat_example_app");
+  writeFileSync(join(dir.appsDir, dir.name, "thumbnail.webp"), webpLossless(64, 64));
+  const res = validateSubmission({ appsDir: dir.appsDir, dirName: dir.name });
+  assert.equal(res.ok, false);
+  assert.ok(res.errors.some((e) => /thumbnail\.webp is too small/.test(e)), res.errors.join("\n"));
+});
+
 // --- helper: write a bundle to a throwaway apps/<dir>/recording.json ---
 function writeTemp(bundle, dirName) {
   const root = mkdtempSync(join(tmpdir(), "gallery-test-"));
@@ -156,4 +190,16 @@ function writeTemp(bundle, dirName) {
   mkdirSync(join(appsDir, dirName), { recursive: true });
   writeFileSync(join(appsDir, dirName, "recording.json"), JSON.stringify(bundle));
   return { appsDir, name: dirName };
+}
+
+// A minimal lossless-WebP (VP8L) buffer whose header carries the given size —
+// enough for the dimension check, which only reads the RIFF/VP8L header.
+function webpLossless(width, height) {
+  const buf = Buffer.alloc(30);
+  buf.write("RIFF", 0, "ascii");
+  buf.write("WEBP", 8, "ascii");
+  buf.write("VP8L", 12, "ascii");
+  buf[20] = 0x2f; // VP8L signature byte
+  buf.writeUInt32LE(((width - 1) & 0x3fff) | (((height - 1) & 0x3fff) << 14), 21);
+  return buf;
 }
