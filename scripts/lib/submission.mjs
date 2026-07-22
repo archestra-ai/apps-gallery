@@ -21,13 +21,20 @@ export function expectedDirName(login, appName) {
   return `${login}_${slugify(appName) || "app-session"}`;
 }
 
+// The thumbnail formats the client can emit: a DOM app's PNG/JPEG still, or a
+// canvas/video app's WebP frame (canvas.toBlob → image/webp). Kept as one list
+// so the allowed-path regex and the on-disk validation agree on the set.
+export const THUMBNAIL_EXTS = ["png", "jpg", "jpeg", "webp"];
+
 // A submission PR may only add these two files, and only under apps/<dir>/.
-export const ALLOWED_SUBMISSION_PATH = /^apps\/[^/]+\/(recording\.json|thumbnail\.png)$/;
+export const ALLOWED_SUBMISSION_PATH = new RegExp(
+  `^apps/[^/]+/(recording\\.json|thumbnail\\.(?:${THUMBNAIL_EXTS.join("|")}))$`,
+);
 
 /**
  * Split a changed-path list into three buckets:
- * - `dirs` — the submission folder(s) a clean recording.json/thumbnail.png
- *   pair was found under.
+ * - `dirs` — the submission folder(s) a clean recording.json/thumbnail pair
+ *   was found under.
  * - `malformed` — paths under `apps/` that don't match the exact 2-file
  *   pattern (an extra file smuggled into an otherwise submission-shaped
  *   folder, a nested path, a stray root-level file). Always suspicious,
@@ -52,7 +59,14 @@ const MIN_THUMBNAIL_PX = 100;
 // Reject ASCII control characters and angle brackets in the free-text category.
 const UNSAFE_CATEGORY = /[\x00-\x1f<>]/;
 
-// PNG IHDR parse — signature + width/height, no image library needed.
+// Read a thumbnail's pixel dimensions by sniffing its header — no image library
+// needed. Dispatches on the file signature (not the extension, which a hand-made
+// PR could misname) and returns null for anything that isn't a PNG/JPEG/WebP.
+function readImageSize(bytes) {
+  return readPngSize(bytes) ?? readJpegSize(bytes) ?? readWebpSize(bytes);
+}
+
+// PNG IHDR parse — signature + width/height.
 function readPngSize(bytes) {
   const sig = [137, 80, 78, 71, 13, 10, 26, 10];
   if (bytes.length < 24) return null;
@@ -61,6 +75,54 @@ function readPngSize(bytes) {
   const width = bytes.readUInt32BE(16);
   const height = bytes.readUInt32BE(20);
   return { width, height };
+}
+
+// JPEG: walk the marker segments to the Start-Of-Frame, which carries the size.
+function readJpegSize(bytes) {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  let off = 2;
+  while (off + 9 <= bytes.length) {
+    if (bytes[off] !== 0xff) return null;
+    const marker = bytes[off + 1];
+    // Standalone markers (RSTn, SOI, EOI, TEM) carry no length payload.
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd9)) {
+      off += 2;
+      continue;
+    }
+    // SOF0..SOF15 hold the frame size — except DHT(C4), JPG(C8), DAC(CC).
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      const height = bytes.readUInt16BE(off + 5);
+      const width = bytes.readUInt16BE(off + 7);
+      return { width, height };
+    }
+    off += 2 + bytes.readUInt16BE(off + 2); // skip this segment
+  }
+  return null;
+}
+
+// WebP (RIFF container): the canvas encoder emits lossy VP8, but read all three
+// chunk types so a hand-made lossless/extended WebP validates too.
+function readWebpSize(bytes) {
+  if (bytes.length < 30) return null;
+  if (bytes.toString("ascii", 0, 4) !== "RIFF" || bytes.toString("ascii", 8, 12) !== "WEBP") return null;
+  const chunk = bytes.toString("ascii", 12, 16);
+  if (chunk === "VP8 ") {
+    // Lossy keyframe: start code 0x9d 0x01 0x2a, then 14-bit width/height (LE).
+    if (bytes[23] !== 0x9d || bytes[24] !== 0x01 || bytes[25] !== 0x2a) return null;
+    return { width: bytes.readUInt16LE(26) & 0x3fff, height: bytes.readUInt16LE(28) & 0x3fff };
+  }
+  if (chunk === "VP8L") {
+    if (bytes[20] !== 0x2f) return null;
+    const bits = bytes.readUInt32LE(21);
+    return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 };
+  }
+  if (chunk === "VP8X") {
+    // Canvas size is stored minus one, as two little-endian 24-bit fields.
+    const width = (bytes[24] | (bytes[25] << 8) | (bytes[26] << 16)) + 1;
+    const height = (bytes[27] | (bytes[28] << 8) | (bytes[29] << 16)) + 1;
+    return { width, height };
+  }
+  return null;
 }
 
 /**
@@ -131,18 +193,18 @@ export function validateSubmission({ appsDir, dirName, expectedLogin }) {
 
   // --- thumbnail (optional) ---
   let thumbnailPath;
-  const thumbAbs = join(dir, "thumbnail.png");
-  if (existsSync(thumbAbs)) {
-    const size = readPngSize(readFileSync(thumbAbs));
+  const thumbName = THUMBNAIL_EXTS.map((ext) => `thumbnail.${ext}`).find((name) => existsSync(join(dir, name)));
+  if (thumbName) {
+    const size = readImageSize(readFileSync(join(dir, thumbName)));
     if (!size) {
-      errors.push(`${dirName}: thumbnail.png is not a valid PNG.`);
+      errors.push(`${dirName}: ${thumbName} is not a valid image (expected PNG, JPEG, or WebP).`);
     } else if (size.width < MIN_THUMBNAIL_PX || size.height < MIN_THUMBNAIL_PX) {
-      errors.push(`${dirName}: thumbnail.png is too small (${size.width}x${size.height}, min ${MIN_THUMBNAIL_PX}px).`);
+      errors.push(`${dirName}: ${thumbName} is too small (${size.width}x${size.height}, min ${MIN_THUMBNAIL_PX}px).`);
     } else {
-      thumbnailPath = `apps/${dirName}/thumbnail.png`;
+      thumbnailPath = `apps/${dirName}/${thumbName}`;
     }
   } else {
-    warnings.push(`${dirName}: no thumbnail.png — the gallery will render a generated card.`);
+    warnings.push(`${dirName}: no thumbnail — the gallery will render a generated card.`);
   }
 
   if (errors.length > 0) return { ok: false, errors, warnings, bundle };

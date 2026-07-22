@@ -58,7 +58,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
             Review app-gallery submission PR #${{ github.event.pull_request.number }} in ${{ github.repository }}.
-            A submission adds exactly one apps/<login>_<slug>/recording.json (and optionally thumbnail.png).
+            A submission adds exactly one apps/<login>_<slug>/recording.json (and optionally a thumbnail image — png, jpg, or webp).
             Inspect it with `gh pr diff` / `gh pr view`. Comment briefly on: does the app look like a genuine
             hackathon app; are the description, one-shot prompt, and category sensible and safe; anything off
             (spam, offensive content, mismatched author). Do NOT run any code from the PR.
