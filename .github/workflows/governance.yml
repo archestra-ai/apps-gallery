@@ -33,22 +33,6 @@ jobs:
         with:
           node-version: 20
 
-      - name: Enforce one open PR per author
-        env:
-          GH_TOKEN: ${{ github.token }}
-          AUTHOR: ${{ github.event.pull_request.user.login }}
-          PR: ${{ github.event.pull_request.number }}
-        run: |
-          count=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --json author \
-            | jq --arg author "$AUTHOR" '[.[] | select(.author.login == $author)] | length')
-          echo "Open PRs by $AUTHOR: $count"
-          if [ "$count" -gt 1 ]; then
-            gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body \
-              "Thanks for submitting! You already have an open submission PR — please land or close it before opening another. Only one open submission per person at a time."
-            echo "::error::Author $AUTHOR has more than one open PR."
-            exit 1
-          fi
-
       - name: Auto-assign a round-robin reviewer
         env:
           GH_TOKEN: ${{ github.token }}

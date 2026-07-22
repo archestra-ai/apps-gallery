@@ -40,8 +40,8 @@ the app slug. One folder per app; re-sharing the same app updates the same PR.
 
 ## Rules
 
-- **One open PR per person at a time.** Land or close your current submission
-  before opening another. (CI enforces this.)
+- **Submit as many apps as you like** — there's no limit on open submissions per
+  person.
 - **Submit only your own app**, under `apps/<your-login>_.../`. The folder login
   must match the PR author.
 - The bundle must be a valid, playable final-cut recording produced by Archestra

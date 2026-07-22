@@ -22,8 +22,8 @@ submission as the app's author. **Your email is never read, stored, or sent.**
 
 ## Rules enforced by CI
 
-- **One open PR per person.** Close or land your current submission before
-  starting another.
+- **Submit as many apps as you like.** There's no limit on open submissions per
+  person — each app is its own PR.
 - **Own-app only.** The folder must be `apps/<your-github-login>_<slug>/` and the
   login must match the PR author.
 - **Only two files.** A PR may add `recording.json` and optionally
