@@ -20,8 +20,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Job name kept as "validate" so the required status-check context matches
+  # branch protection (see .github/BRANCH_PROTECTION.md).
   validate:
-    name: Validate submission
+    name: validate
     runs-on: ubuntu-latest
     permissions:
       contents: read # read-only: only reads the PR's files to validate them
