@@ -35,14 +35,14 @@ jobs:
 
       - name: Checkout base (no persisted credentials, no fork code)
         if: steps.cred.outputs.present == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 1
           persist-credentials: false
 
       - name: Review with Claude
         if: steps.cred.outputs.present == 'true'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@fa7e2f0a29a126f0b81cdcf360561b36e44cf608 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
