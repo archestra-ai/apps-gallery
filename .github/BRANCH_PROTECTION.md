@@ -11,7 +11,7 @@ collaborators →** select **"Require approval for all outside collaborators."**
 
 This holds the `pull_request`-triggered `validate` run (the only job that touches
 fork content) until a maintainer approves it, satisfying "owner approval before PR
-checks run." The `pull_request_target` jobs (governance, claude-review) run in base
+checks run." The `pull_request_target` jobs (governance, pr-preview) run in base
 context, execute no fork code, and are safe to run immediately.
 
 ## 2. Protect `main`

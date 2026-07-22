@@ -22,8 +22,8 @@ submission as the app's author. **Your email is never read, stored, or sent.**
 
 ## Rules enforced by CI
 
-- **One open PR per person.** Close or land your current submission before
-  starting another.
+- **Submit as many apps as you like.** There's no limit on open submissions per
+  person — each app is its own PR.
 - **Own-app only.** The folder must be `apps/<your-github-login>_<slug>/` and the
   login must match the PR author.
 - **Only two files.** A PR may add `recording.json` and optionally
@@ -34,7 +34,8 @@ submission as the app's author. **Your email is never read, stored, or sent.**
 
 ## Review & merge
 
-- A maintainer is auto-assigned to your PR, and a Claude review posts feedback.
+- A maintainer is auto-assigned to your PR, and when your submission includes a
+  thumbnail, its cover image, description, and build prompt are posted to the PR.
 - Only maintainers (code owners) can approve and merge. PRs from outside
   contributors run CI only after a maintainer approves the run.
 - Once merged, your app appears in the gallery on the Archestra website
