@@ -34,7 +34,7 @@ submission as the app's author. **Your email is never read, stored, or sent.**
 
 ## Review & merge
 
-- A maintainer is auto-assigned to your PR, and a Claude review posts feedback.
+- A maintainer is auto-assigned to your PR.
 - Only maintainers (code owners) can approve and merge. PRs from outside
   contributors run CI only after a maintainer approves the run.
 - Once merged, your app appears in the gallery on the Archestra website
