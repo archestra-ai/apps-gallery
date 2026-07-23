@@ -1,0 +1,90 @@
+name: Hackathon review intake
+
+# When a submission PR opens, push its card onto the Hackathon review board so a
+# reviewer sees it in Archestra (and the Slack review card is posted). Reads PR
+# metadata + the submission's recording.json as data via the API — it never checks
+# out or runs any code from the fork. Runs in BASE context so the board's ingest
+# secret is available.
+#
+# Requires two repo Actions secrets (skips cleanly if unset):
+#   HACKATHON_INGEST_URL     — the board's public base URL (…/ingest webhook)
+#   HACKATHON_INGEST_SECRET  — the shared secret (board's INGEST_SECRET), sent as X-Ingest-Secret
+on:
+  # zizmor: ignore[dangerous-triggers] — intentional: needs the ingest secret
+  # (base context) to push to the external board. Checks out the base ref with no
+  # persisted credentials and never runs fork code (it only parses recording.json
+  # as data).
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+    paths:
+      - "apps/**"
+
+permissions: {} # deny-all baseline; the job grants only what it needs
+
+concurrency:
+  group: hackathon-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  intake:
+    name: Push submission to the review board
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # gh api: read the submission bundle
+      pull-requests: read # gh pr view: changed-file list + metadata
+    steps:
+      # base ref (trusted): our own scripts/lib, never fork code.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+
+      - name: Ingest submission(s) onto the Hackathon board
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE_REPO: ${{ github.repository }}
+          # Fork coordinates via env (never inlined into a script) so a crafted
+          # repo/branch name can't be interpreted as shell.
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HACKATHON_INGEST_URL: ${{ secrets.HACKATHON_INGEST_URL }}
+          HACKATHON_INGEST_SECRET: ${{ secrets.HACKATHON_INGEST_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${HACKATHON_INGEST_URL:-}" ] || [ -z "${HACKATHON_INGEST_SECRET:-}" ]; then
+            echo "HACKATHON_INGEST_URL / _SECRET not configured — skipping board intake."
+            exit 0
+          fi
+
+          # Changed files (base-context metadata only — no fork checkout).
+          paths=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json files --jq '.files[].path')
+
+          recordings=$(printf '%s\n' "$paths" | grep -E '^apps/[^/]+/recording\.json$' || true)
+          if [ -z "$recordings" ]; then
+            echo "No submission recording.json in this PR; nothing to ingest."
+            exit 0
+          fi
+
+          while IFS= read -r recording; do
+            [ -z "$recording" ] && continue
+            dir=$(printf '%s' "$recording" | cut -d/ -f2)
+
+            # Optional thumbnail → commit-pinned raw URL at the PR head. Match the
+            # dir with a fixed-string grep (never interpolate it into a regex).
+            thumb=$(printf '%s\n' "$paths" \
+              | grep -E '^apps/[^/]+/thumbnail\.(png|jpg|jpeg|webp)$' \
+              | grep -F "apps/$dir/" | head -n1 || true)
+            thumb_url=""
+            [ -n "$thumb" ] && thumb_url="https://github.com/$HEAD_REPO/raw/$HEAD_SHA/$thumb"
+
+            # Pull the bundle JSON as data (raw media type handles bundles >1MB).
+            gh api "repos/$HEAD_REPO/contents/$recording?ref=$HEAD_SHA" \
+              -H "Accept: application/vnd.github.raw" > recording.json
+
+            node scripts/ci/notify-review.mjs recording.json "$thumb_url"
+          done <<< "$recordings"
