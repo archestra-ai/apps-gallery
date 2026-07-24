@@ -48,6 +48,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
           BASE_REPO: ${{ github.repository }}
+          AUTHOR_LOGIN: ${{ github.event.pull_request.user.login }}
           # Fork coordinates via env (never inlined into a script) so a crafted
           # repo/branch name can't be interpreted as shell.
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}

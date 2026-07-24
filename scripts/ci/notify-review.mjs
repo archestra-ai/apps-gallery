@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Trigger the org-wide Hackathon agent to run intake for a submission, via its A2A
-// endpoint. The agent ingests the card onto the board, mints the replay chat link,
-// announces it in the review Slack channel, and assigns a reviewer. Pure data in,
-// one A2A message out — reads only the recording.json the workflow downloaded; it
-// never runs anything from the PR.
+// endpoint. The agent ingests the card onto the board, mints the replay link, announces
+// it in the review Slack channel, and assigns a reviewer. Pure data in, one A2A message
+// out — reads only the recording.json the workflow downloaded; never runs anything from
+// the PR. DEPENDENCY-FREE (node builtins only) so CI needs no `npm install`.
 //
 // Usage: node scripts/ci/notify-review.mjs <recording.json> [thumbnailUrl]
 // Env:
@@ -12,7 +12,6 @@
 //   HACKATHON_A2A_TOKEN      — Archestra bearer token (archestra_…) for that endpoint
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { deriveIndexEntry } from "../lib/submission.mjs";
 
 const recordingPath = process.argv[2];
 const thumbnailUrl = process.argv[3] || "";
@@ -28,13 +27,16 @@ if (!a2aUrl || !token) {
   process.exit(0);
 }
 
-// apps/<dir>/recording.json -> <dir>
-const dirName = recordingPath.replace(/\/recording\.json$/, "").split("/").pop();
+// The workflow downloads the bundle to a bare `recording.json`, so take the author from the
+// bundle itself (meta.github.login), falling back to the PR author the workflow passes.
 const bundle = JSON.parse(readFileSync(recordingPath, "utf8"));
+const login = bundle.meta?.github?.login || process.env.AUTHOR_LOGIN || "unknown";
 
-// Reuse the gallery's own card derivation so the board shows exactly what the
-// gallery index will (name/category/description/prompt/duration/author).
-const entry = deriveIndexEntry({ dirName, bundle, thumbnailPath: null });
+// Same card fields the gallery index uses (mirrors scripts/lib/submission.mjs deriveIndexEntry),
+// extracted inline so this script pulls in no zod-backed schema module (CI runs it without deps).
+const enh = bundle.enhancement || {};
+const meta = bundle.meta || {};
+const durationMs = meta.finalCutDurationMs ?? bundle.recording?.durationMs ?? 0;
 
 const pr = Number(process.env.PR);
 const baseRepo = process.env.BASE_REPO || "";
@@ -42,15 +44,15 @@ const card = {
   pr,
   headRepo: baseRepo,
   headSha: process.env.HEAD_SHA || null,
-  author: entry.author.login,
-  authorName: entry.author.name || entry.author.login,
-  authorProfileUrl: `https://github.com/${entry.author.login}`,
+  author: login,
+  authorName: meta.github?.name || login,
+  authorProfileUrl: `https://github.com/${login}`,
   app: {
-    name: entry.appName,
-    category: entry.category,
-    description: entry.description,
-    prompt: entry.prompt,
-    durationSeconds: entry.durationSeconds,
+    name: bundle.app?.name || "Untitled app",
+    category: enh.category || "Other",
+    description: enh.description || "",
+    prompt: enh.prompt || "",
+    durationSeconds: Math.max(1, Math.round(durationMs / 1000)),
   },
   thumbnailUrl: thumbnailUrl || undefined,
   prUrl: `https://github.com/${baseRepo}/pull/${pr}`,
@@ -89,8 +91,8 @@ if (parsed?.error) {
   process.exit(1);
 }
 if (/INPUT_REQUIRED/.test(out)) {
-  // The agent paused for a tool approval — its intake tools should be set to
-  // auto-run so unattended CI intake can complete. Don't fail the PR over it.
+  // The agent paused for a tool approval — its intake tools should be set to auto-run
+  // so unattended CI intake can complete. Don't fail the PR over it.
   console.warn(`Note: the Hackathon agent paused for a tool approval (set its intake tools to auto-run). PR #${pr}.`);
 }
-console.log(`sent intake for "${entry.appName}" (PR #${pr}) to the Hackathon agent.`);
+console.log(`sent intake for "${card.app.name}" (PR #${pr}) to the Hackathon agent.`);
