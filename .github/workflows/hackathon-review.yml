@@ -20,7 +20,12 @@ on:
     # push — re-run intake so the board's reviewers (and the Slack card, which only posts once a
     # reviewer is known) stay in sync. No `paths` filter: those events carry no file diff, and the
     # job itself checks the PR's files and no-ops unless it contains a submission recording.json.
-    types: [opened, reopened, synchronize, review_requested, review_request_removed]
+    # closed: a merge/close never changes file content, so re-running intake would learn nothing —
+    # worse, ingest always (re-)writes the submission as pending, so it would reset a just-resolved
+    # PR back to pending. Instead we branch on github.event.action: 'closed' asks the agent to
+    # reconcile the whole board to GitHub's real PR state (merged → approved, closed-without-merge →
+    # declined, still-open → unchanged); every other action runs the normal intake path unchanged.
+    types: [opened, reopened, synchronize, review_requested, review_request_removed, closed]
 
 permissions: {} # deny-all baseline; the job grants only what it needs
 
@@ -45,7 +50,10 @@ jobs:
         with:
           node-version: 20
 
+      # Intake path — every action EXCEPT 'closed'. Reads PR metadata + the submission's
+      # recording.json as data and asks the agent to (re-)ingest each submission onto the board.
       - name: Send submission(s) to the Hackathon agent
+        if: ${{ github.event.action != 'closed' }}
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
@@ -104,3 +112,25 @@ jobs:
 
             node scripts/ci/notify-review.mjs recording.json "$thumb_url"
           done <<< "$recordings"
+
+      # Reconcile path — only when a PR is closed/merged. There is nothing to ingest (no content
+      # change), and reconcile is a whole-board sync, so we skip the recording download entirely and
+      # send ONE A2A message asking the agent to run hackathon__reconcile_board. Fires for any closed
+      # PR (submission or not): reconcile keys off each PR's real GitHub state and is idempotent +
+      # throttled agent-side, so a stray infra-PR close is a cheap no-op.
+      - name: Reconcile the review board to GitHub PR state
+        if: ${{ github.event.action == 'closed' }}
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          BASE_REPO: ${{ github.repository }}
+          HACKATHON_AGENT_A2A_URL: ${{ vars.HACKATHON_AGENT_A2A_URL }}
+          HACKATHON_A2A_TOKEN: ${{ secrets.HACKATHON_A2A_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${HACKATHON_AGENT_A2A_URL:-}" ] || [ -z "${HACKATHON_A2A_TOKEN:-}" ]; then
+            echo "HACKATHON_AGENT_A2A_URL / _TOKEN not configured — skipping board reconcile."
+            exit 0
+          fi
+
+          node scripts/ci/notify-review.mjs --reconcile
