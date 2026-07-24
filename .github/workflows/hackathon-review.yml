@@ -1,19 +1,20 @@
 name: Hackathon review intake
 
-# When a submission PR opens, push its card onto the Hackathon review board so a
-# reviewer sees it in Archestra (and the Slack review card is posted). Reads PR
-# metadata + the submission's recording.json as data via the API — it never checks
-# out or runs any code from the fork. Runs in BASE context so the board's ingest
-# secret is available.
+# When a submission PR opens, trigger the org-wide Hackathon agent to run intake:
+# it ingests the submission onto the review board, mints the replay chat link (which
+# makes the board post the Slack review card), and assigns a reviewer. We only read
+# PR metadata + the submission's recording.json as data via the API — this never
+# checks out or runs any code from the fork. Runs in BASE context so the agent token
+# is available; the agent reaches the board internally, so the board needs no public
+# endpoint.
 #
-# Requires two repo Actions secrets (skips cleanly if unset):
-#   HACKATHON_INGEST_URL     — the board's public base URL (…/ingest webhook)
-#   HACKATHON_INGEST_SECRET  — the shared secret (board's INGEST_SECRET), sent as X-Ingest-Secret
+# Requires (skips cleanly if unset):
+#   vars.HACKATHON_AGENT_A2A_URL   — the Hackathon agent's A2A endpoint (…/v2/a2a/<agentId>)
+#   secrets.HACKATHON_A2A_TOKEN    — an Archestra bearer token (archestra_…) for that endpoint
 on:
-  # zizmor: ignore[dangerous-triggers] — intentional: needs the ingest secret
-  # (base context) to push to the external board. Checks out the base ref with no
-  # persisted credentials and never runs fork code (it only parses recording.json
-  # as data).
+  # zizmor: ignore[dangerous-triggers] — intentional: needs the agent token (base
+  # context) to trigger the review agent. Checks out the base ref with no persisted
+  # credentials and never runs fork code (it only parses recording.json as data).
   pull_request_target:
     types: [opened, reopened, synchronize]
     paths:
@@ -27,7 +28,7 @@ concurrency:
 
 jobs:
   intake:
-    name: Push submission to the review board
+    name: Trigger the Hackathon agent
     runs-on: ubuntu-latest
     permissions:
       contents: read # gh api: read the submission bundle
@@ -42,7 +43,7 @@ jobs:
         with:
           node-version: 20
 
-      - name: Ingest submission(s) onto the Hackathon board
+      - name: Send submission(s) to the Hackathon agent
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
@@ -51,13 +52,13 @@ jobs:
           # repo/branch name can't be interpreted as shell.
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          HACKATHON_INGEST_URL: ${{ secrets.HACKATHON_INGEST_URL }}
-          HACKATHON_INGEST_SECRET: ${{ secrets.HACKATHON_INGEST_SECRET }}
+          HACKATHON_AGENT_A2A_URL: ${{ vars.HACKATHON_AGENT_A2A_URL }}
+          HACKATHON_A2A_TOKEN: ${{ secrets.HACKATHON_A2A_TOKEN }}
         run: |
           set -euo pipefail
 
-          if [ -z "${HACKATHON_INGEST_URL:-}" ] || [ -z "${HACKATHON_INGEST_SECRET:-}" ]; then
-            echo "HACKATHON_INGEST_URL / _SECRET not configured — skipping board intake."
+          if [ -z "${HACKATHON_AGENT_A2A_URL:-}" ] || [ -z "${HACKATHON_A2A_TOKEN:-}" ]; then
+            echo "HACKATHON_AGENT_A2A_URL / _TOKEN not configured — skipping agent intake."
             exit 0
           fi
 
@@ -66,7 +67,7 @@ jobs:
 
           recordings=$(printf '%s\n' "$paths" | grep -E '^apps/[^/]+/recording\.json$' || true)
           if [ -z "$recordings" ]; then
-            echo "No submission recording.json in this PR; nothing to ingest."
+            echo "No submission recording.json in this PR; nothing to send."
             exit 0
           fi
 
