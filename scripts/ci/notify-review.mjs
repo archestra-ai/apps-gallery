@@ -90,9 +90,21 @@ if (parsed?.error) {
   console.error(`A2A error: ${JSON.stringify(parsed.error)}`);
   process.exit(1);
 }
+// --- DIAGNOSTIC: dump exactly what the agent returned, so a "green" run that didn't ingest is
+// debuggable. Shows whether the agent ran the tool, asked a question, paused for approval, or errored.
+const r = parsed?.result ?? parsed;
+const state = r?.status?.state ?? r?.state ?? r?.kind ?? "(no state field)";
+const approvals = r?.status?.metadata?.approvalRequests ?? r?.metadata?.approvalRequests ?? r?.metadata?.taskOps;
+const said = [];
+const collect = (m) => { for (const p of (m?.parts ?? [])) if (typeof p?.text === "string") said.push(p.text); };
+collect(r?.status?.message); collect(r); (r?.history ?? []).forEach(collect); (r?.artifacts ?? []).forEach(collect);
+console.log(`--- A2A DIAGNOSTIC (HTTP ${res.status}) ---`);
+console.log(`state: ${typeof state === "string" ? state : JSON.stringify(state)}`);
+if (approvals) console.log(`approvalRequests/taskOps present: ${JSON.stringify(approvals).slice(0, 800)}`);
+if (said.length) console.log(`agent text: ${said.join("\n---\n").slice(0, 2000)}`);
+console.log(`raw response (first 3500): ${out.slice(0, 3500)}`);
+console.log(`--- end A2A DIAGNOSTIC ---`);
 if (/INPUT_REQUIRED/.test(out)) {
-  // The agent paused for a tool approval — its intake tools should be set to auto-run
-  // so unattended CI intake can complete. Don't fail the PR over it.
-  console.warn(`Note: the Hackathon agent paused for a tool approval (set its intake tools to auto-run). PR #${pr}.`);
+  console.warn(`Note: the Hackathon agent paused for a tool approval — set its intake tools to auto-run. PR #${pr}.`);
 }
 console.log(`sent intake for "${card.app.name}" (PR #${pr}) to the Hackathon agent.`);
