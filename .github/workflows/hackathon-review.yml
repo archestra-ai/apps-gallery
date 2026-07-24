@@ -16,9 +16,11 @@ on:
   # context) to trigger the review agent. Checks out the base ref with no persisted
   # credentials and never runs fork code (it only parses recording.json as data).
   pull_request_target:
-    types: [opened, reopened, synchronize]
-    paths:
-      - "apps/**"
+    # review_requested / review_request_removed: the reviewer SET can change without a content
+    # push — re-run intake so the board's reviewers (and the Slack card, which only posts once a
+    # reviewer is known) stay in sync. No `paths` filter: those events carry no file diff, and the
+    # job itself checks the PR's files and no-ops unless it contains a submission recording.json.
+    types: [opened, reopened, synchronize, review_requested, review_request_removed]
 
 permissions: {} # deny-all baseline; the job grants only what it needs
 
@@ -63,7 +65,8 @@ jobs:
             exit 0
           fi
 
-          # Changed files (base-context metadata only — no fork checkout).
+          # PR files (all of them, base-context metadata only — works for any event type, incl.
+          # review_requested which carries no diff).
           paths=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json files --jq '.files[].path')
 
           recordings=$(printf '%s\n' "$paths" | grep -E '^apps/[^/]+/recording\.json$' || true)
@@ -72,17 +75,28 @@ jobs:
             exit 0
           fi
 
+          # The PR's CURRENT requested reviewers (users + teams) — the source of truth the board
+          # uses; the agent must not guess. Teams surface as their slug (org/team), kind=team.
+          REVIEWERS_JSON=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json reviewRequests \
+            --jq '[.reviewRequests[] | if (.__typename // .type) == "Team" then {login: .slug, kind: "team", name: .name} else {login: .login, kind: "user"} end]')
+          export REVIEWERS_JSON
+
           while IFS= read -r recording; do
             [ -z "$recording" ] && continue
             dir=$(printf '%s' "$recording" | cut -d/ -f2)
 
-            # Optional thumbnail → commit-pinned raw URL at the PR head. Match the
-            # dir with a fixed-string grep (never interpolate it into a regex).
+            # raw.githubusercontent (NOT github.com/…/raw, which 302s to a text/html page the
+            # ui:// sandbox img / Slack can't render) — commit-pinned at the PR head.
+            RECORDING_URL="https://raw.githubusercontent.com/$HEAD_REPO/$HEAD_SHA/$recording"
+            export RECORDING_URL
+
+            # Optional thumbnail → commit-pinned raw URL. Match the dir with a fixed-string grep
+            # (never interpolate it into a regex).
             thumb=$(printf '%s\n' "$paths" \
               | grep -E '^apps/[^/]+/thumbnail\.(png|jpg|jpeg|webp)$' \
               | grep -F "apps/$dir/" | head -n1 || true)
             thumb_url=""
-            [ -n "$thumb" ] && thumb_url="https://github.com/$HEAD_REPO/raw/$HEAD_SHA/$thumb"
+            [ -n "$thumb" ] && thumb_url="https://raw.githubusercontent.com/$HEAD_REPO/$HEAD_SHA/$thumb"
 
             # Pull the bundle JSON as data (raw media type handles bundles >1MB).
             gh api "repos/$HEAD_REPO/contents/$recording?ref=$HEAD_SHA" \
