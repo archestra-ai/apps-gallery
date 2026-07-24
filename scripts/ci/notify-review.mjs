@@ -1,13 +1,15 @@
 #!/usr/bin/env node
-// Trigger the org-wide Hackathon agent to run intake for a submission, via its A2A
-// endpoint. The agent ingests the card onto the board, mints the replay link, announces
-// it in the review Slack channel, and assigns a reviewer. Pure data in, one A2A message
-// out — reads only the recording.json the workflow downloaded; never runs anything from
-// the PR. DEPENDENCY-FREE (node builtins only) so CI needs no `npm install`.
+// Trigger the org-wide Hackathon agent to run intake for a submission, via its A2A endpoint. The
+// agent makes ONE deterministic hackathon__ingest_submission call with the card below — the board
+// server then stores it, sets the reviewer SET, fetches + stores the recording, and posts the
+// Slack review card. Pure data in, one A2A message out — reads only the recording.json the workflow
+// downloaded; never runs anything from the PR. DEPENDENCY-FREE (node builtins only).
 //
 // Usage: node scripts/ci/notify-review.mjs <recording.json> [thumbnailUrl]
 // Env:
-//   PR, BASE_REPO, HEAD_SHA
+//   PR, BASE_REPO, HEAD_REPO, HEAD_SHA, AUTHOR_LOGIN
+//   RECORDING_URL   — raw.githubusercontent URL of this submission's recording.json (server fetches it)
+//   REVIEWERS_JSON  — JSON array of the PR's requested reviewers [{login,kind,name?}] (users + teams)
 //   HACKATHON_AGENT_A2A_URL  — the agent's A2A endpoint (…/v2/a2a/<agentId>)
 //   HACKATHON_A2A_TOKEN      — Archestra bearer token (archestra_…) for that endpoint
 import { readFileSync } from "node:fs";
@@ -27,22 +29,25 @@ if (!a2aUrl || !token) {
   process.exit(0);
 }
 
-// The workflow downloads the bundle to a bare `recording.json`, so take the author from the
-// bundle itself (meta.github.login), falling back to the PR author the workflow passes.
 const bundle = JSON.parse(readFileSync(recordingPath, "utf8"));
 const login = bundle.meta?.github?.login || process.env.AUTHOR_LOGIN || "unknown";
 
-// Same card fields the gallery index uses (mirrors scripts/lib/submission.mjs deriveIndexEntry),
-// extracted inline so this script pulls in no zod-backed schema module (CI runs it without deps).
 const enh = bundle.enhancement || {};
 const meta = bundle.meta || {};
 const durationMs = meta.finalCutDurationMs ?? bundle.recording?.durationMs ?? 0;
+
+// The PR's requested reviewers (users + teams), read by the workflow via `gh pr view`. This is the
+// source of truth for who reviews — the agent must NOT guess. May be empty (reviewers get requested
+// slightly later); a follow-up review_requested event re-runs intake and the card posts then.
+let reviewers = [];
+try { reviewers = JSON.parse(process.env.REVIEWERS_JSON || "[]"); } catch { reviewers = []; }
 
 const pr = Number(process.env.PR);
 const baseRepo = process.env.BASE_REPO || "";
 const card = {
   pr,
   headRepo: baseRepo,
+  headOwner: (process.env.HEAD_REPO || "").split("/")[0] || undefined,
   headSha: process.env.HEAD_SHA || null,
   author: login,
   authorName: meta.github?.name || login,
@@ -54,13 +59,23 @@ const card = {
     prompt: enh.prompt || "",
     durationSeconds: Math.max(1, Math.round(durationMs / 1000)),
   },
+  reviewers,
+  recordingUrl: process.env.RECORDING_URL || undefined,
   thumbnailUrl: thumbnailUrl || undefined,
   prUrl: `https://github.com/${baseRepo}/pull/${pr}`,
 };
 
+// Lead with a clean title line so the agent conversation is named usefully, then a short, explicit
+// instruction. Intake is a single deterministic tool call — the card already carries the reviewers,
+// recording URL, and thumbnail; the agent neither guesses reviewers nor calls github_copilot.
 const text = [
-  `A new App Gallery hackathon submission was opened as PR #${pr} in ${baseRepo}.`,
-  `Please run intake for it: ingest the submission onto the Hackathon board (card below), mint its replay chat link, announce it in the review Slack channel (with the thumbnail), and assign a reviewer.`,
+  `Hackathon intake — ${card.app.name} (PR #${pr})`,
+  "",
+  `A new App Gallery submission opened as PR #${pr} in ${baseRepo}. Run intake now: call`,
+  `hackathon__ingest_submission with the card below verbatim. That single call stores the`,
+  `submission, sets its reviewer SET from card.reviewers (do NOT guess or reassign), fetches +`,
+  `stores the recording from card.recordingUrl, and posts the Slack review card. Do not call any`,
+  `github_copilot tool during intake.`,
   "",
   "```json",
   JSON.stringify(card, null, 2),
@@ -90,21 +105,16 @@ if (parsed?.error) {
   console.error(`A2A error: ${JSON.stringify(parsed.error)}`);
   process.exit(1);
 }
-// --- DIAGNOSTIC: dump exactly what the agent returned, so a "green" run that didn't ingest is
-// debuggable. Shows whether the agent ran the tool, asked a question, paused for approval, or errored.
+// Concise result summary (state + a short slice of what the agent said) — enough to tell an
+// ingested run from one that asked/paused, without dumping the whole response.
 const r = parsed?.result ?? parsed;
 const state = r?.status?.state ?? r?.state ?? r?.kind ?? "(no state field)";
-const approvals = r?.status?.metadata?.approvalRequests ?? r?.metadata?.approvalRequests ?? r?.metadata?.taskOps;
 const said = [];
 const collect = (m) => { for (const p of (m?.parts ?? [])) if (typeof p?.text === "string") said.push(p.text); };
 collect(r?.status?.message); collect(r); (r?.history ?? []).forEach(collect); (r?.artifacts ?? []).forEach(collect);
-console.log(`--- A2A DIAGNOSTIC (HTTP ${res.status}) ---`);
-console.log(`state: ${typeof state === "string" ? state : JSON.stringify(state)}`);
-if (approvals) console.log(`approvalRequests/taskOps present: ${JSON.stringify(approvals).slice(0, 800)}`);
-if (said.length) console.log(`agent text: ${said.join("\n---\n").slice(0, 2000)}`);
-console.log(`raw response (first 3500): ${out.slice(0, 3500)}`);
-console.log(`--- end A2A DIAGNOSTIC ---`);
+console.log(`A2A state: ${typeof state === "string" ? state : JSON.stringify(state)}`);
+if (said.length) console.log(`agent: ${said.join(" | ").slice(0, 600)}`);
 if (/INPUT_REQUIRED/.test(out)) {
   console.warn(`Note: the Hackathon agent paused for a tool approval — set its intake tools to auto-run. PR #${pr}.`);
 }
-console.log(`sent intake for "${card.app.name}" (PR #${pr}) to the Hackathon agent.`);
+console.log(`sent intake for "${card.app.name}" (PR #${pr}, reviewers: ${reviewers.map((x) => x.login).join(", ") || "none yet"}).`);
