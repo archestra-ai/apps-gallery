@@ -111,6 +111,33 @@ test("contract: a bundle carrying audio events (current client) validates", () =
   assert.equal(res.ok, true, res.ok ? "" : res.error);
 });
 
+test("contract: a bundle whose chat edits opt into the enhancement (current client) validates", () => {
+  // Toggling "replay the AI-enhanced consolidation" in the player stamps
+  // edits.chat.enhancementEnabled. The whole bundle is rejected if the vendored
+  // schema doesn't know the key, so a submitter who used that toggle could not
+  // submit at all — which is exactly how this drifted out of sync once already.
+  const b = exampleBundle();
+  b.edits = { cuts: [{ fromMs: 100, toMs: 200 }], chat: { enhancementEnabled: true } };
+  const res = validateBundle(b);
+  assert.equal(res.ok, true, res.ok ? "" : res.error);
+});
+
+test("contract: the deprecated enhancementDisabled flag still validates", () => {
+  // Bundles recorded before the default flipped still carry the old key.
+  const b = exampleBundle();
+  b.edits = { cuts: [], chat: { enhancementDisabled: true } };
+  const res = validateBundle(b);
+  assert.equal(res.ok, true, res.ok ? "" : res.error);
+});
+
+test("schema is strict: an unknown chat-edits key is still rejected", () => {
+  // Re-syncing the schema must not turn into loosening it: edits.chat stays
+  // closed, so the next drift fails loudly here instead of in a submitter's PR.
+  const b = exampleBundle();
+  b.edits = { cuts: [], chat: { enhancementEnabled: true, sneaky: "payload" } };
+  assert.equal(validateBundle(b).ok, false);
+});
+
 test("contract: the example fixture passes full submission validation", () => {
   const dir = writeTemp(exampleBundle(), EXAMPLE_DIR);
   const res = validateSubmission({ appsDir: dir.appsDir, dirName: dir.name });
