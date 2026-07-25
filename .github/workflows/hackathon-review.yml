@@ -16,10 +16,14 @@ on:
   # context) to trigger the review agent. Checks out the base ref with no persisted
   # credentials and never runs fork code (it only parses recording.json as data).
   pull_request_target:
-    # review_requested / review_request_removed: the reviewer SET can change without a content
-    # push — re-run intake so the board's reviewers (and the Slack card, which only posts once a
-    # reviewer is known) stay in sync. No `paths` filter: those events carry no file diff, and the
-    # job itself checks the PR's files and no-ops unless it contains a submission recording.json.
+    # review_requested / review_request_removed: the reviewer SET can change without a content push —
+    # re-run intake so the board's reviewers stay in sync. Reviewers are OPTIONAL: intake ingests and
+    # the board posts its Slack card whether or not anyone is assigned yet, so a submission is never
+    # withheld waiting for a reviewer. NOTE: the round-robin reviewer that `governance.yml` assigns
+    # does NOT re-trigger this workflow — that assignment is made with GITHUB_TOKEN, and GitHub
+    # suppresses workflow runs from GITHUB_TOKEN-created events. Only reviewer changes made by a human
+    # or a PAT/App token land here. No `paths` filter: those events carry no file diff, and the job
+    # itself checks the PR's files and no-ops unless it contains a submission recording.json.
     # closed: a merge/close never changes file content, so re-running intake would learn nothing —
     # worse, ingest always (re-)writes the submission as pending, so it would reset a just-resolved
     # PR back to pending. Instead we branch on github.event.action: 'closed' asks the agent to
