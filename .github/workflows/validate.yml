@@ -1,10 +1,23 @@
 name: Validate submission
 
 # Read-only, no secrets. Runs on the untrusted PR but NEVER executes anything
-# from it: the base repo's own validate-submission.mjs enforces the changed-
-# path shape (a smuggled file under apps/ always fails; unrelated files are
-# fine as long as any apps/ submission present still validates strictly),
-# so the validator + its deps are always the base repo's unmodified copies.
+# from it — enforced STRUCTURALLY, by two checkouts that are kept apart:
+#
+#   base/  the pull request's BASE commit. The validator, the schema and the
+#          lockfile live here, and this is the only tree anything runs from.
+#          A pull request cannot influence it.
+#   pr/    the pull request's merged tree. Data only. The base validator reads
+#          `pr/apps` and parses recording.json as JSON; nothing here is ever
+#          imported, installed or executed.
+#
+# It has to be structural. `actions/checkout` with no `ref` resolves to
+# refs/pull/N/merge, so the single-checkout form this workflow used to have was
+# running the PULL REQUEST's copy of validate-submission.mjs, scripts/lib,
+# schema/ and package-lock.json — the submitter's own validator deciding whether
+# the submitter's own bundle is acceptable. The changed-path check cannot close
+# that hole because the code doing the checking is the code being replaced.
+# Separating the trees is what makes this check mean something, and it is what
+# lets fork PRs run it automatically (see .github/BRANCH_PROTECTION.md).
 #
 # Runs on every PR (not only apps/** ones) so it can be a required status check:
 # a non-submission PR (repo maintenance) carries nothing under apps/, and the
@@ -28,9 +41,19 @@ jobs:
     permissions:
       contents: read # read-only: only reads the PR's files to validate them
     steps:
+      # TRUSTED. Pinned to the base COMMIT, not the base branch name, so a merge
+      # landing mid-run can't swap the validator underneath this job.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+
+      # UNTRUSTED — data only. Never installed from, never executed.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+          path: pr
           persist-credentials: false
 
       - name: Compute changed files
@@ -38,25 +61,37 @@ jobs:
         # shell — a ${{ }} expansion of a ref name is a template-injection sink.
         env:
           BASE_REF: ${{ github.base_ref }}
+        working-directory: pr
         run: |
           git fetch --no-tags origin "$BASE_REF"
           # --diff-filter=d excludes deletions: removing a stray file (e.g. a
           # leftover .gitkeep) is never the "smuggled extra file" risk the
           # shape check below guards against, and git diff --name-only would
           # otherwise list a deleted path the exact same way as an added one.
-          git diff --name-only --diff-filter=d "origin/$BASE_REF...HEAD" > /tmp/changed.txt
-          echo "Changed files:"; cat /tmp/changed.txt
+          git diff --name-only --diff-filter=d "origin/$BASE_REF...HEAD" > "$RUNNER_TEMP/changed.txt"
+          echo "Changed files:"; cat "$RUNNER_TEMP/changed.txt"
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
 
+      # Installs from base/package-lock.json. The PR's lockfile is never read:
+      # `zod` is imported by the schema at validate time, so a repointed
+      # dependency would execute inside this job even with --ignore-scripts.
       - name: Install tooling (no lifecycle scripts)
+        working-directory: base
         run: npm ci --ignore-scripts
 
+      # base/ validator, pr/ data. --author is the login GitHub reports for the
+      # PR, which is what the folder name must match — the bundle's own claim
+      # about who made it is never trusted here.
       - name: Validate the submission
         # Same reason: the PR author login reaches the script via the environment,
         # not spliced into the command line.
         env:
           AUTHOR: ${{ github.event.pull_request.user.login }}
-        run: node scripts/validate-submission.mjs --changed /tmp/changed.txt --author "$AUTHOR"
+        run: |
+          node base/scripts/validate-submission.mjs \
+            --apps-dir pr/apps \
+            --changed "$RUNNER_TEMP/changed.txt" \
+            --author "$AUTHOR"
