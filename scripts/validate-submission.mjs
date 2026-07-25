@@ -7,6 +7,13 @@
 //   node scripts/validate-submission.mjs --all
 //   node scripts/validate-submission.mjs <dirName> [<dirName> ...]
 //
+// --apps-dir <dir>: where to READ submission folders from, default `apps`.
+//   Exists so CI can run this script from the trusted base checkout while
+//   pointing it at the pull request's tree — the code that runs and the data it
+//   reads then come from different places, and a PR cannot supply the validator
+//   that judges it. Data only: nothing under this directory is ever imported or
+//   executed, it is read as bytes and parsed as JSON.
+//
 // --changed <file>: a file of newline-separated changed paths (from `git diff
 //   --name-only base...head`). A genuine submission PR (the automated
 //   share-to-gallery flow, or a hand-made one following the same rule) never
@@ -21,14 +28,15 @@
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { validateSubmission, submissionDirsFromPaths } from "./lib/submission.mjs";
 
-const APPS_DIR = "apps";
+const DEFAULT_APPS_DIR = "apps";
 
 function parseArgs(argv) {
-  const opts = { dirs: [], changedFile: null, author: null, all: false };
+  const opts = { dirs: [], changedFile: null, author: null, all: false, appsDir: DEFAULT_APPS_DIR };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--changed") opts.changedFile = argv[++i];
     else if (a === "--author") opts.author = argv[++i];
+    else if (a === "--apps-dir") opts.appsDir = argv[++i];
     else if (a === "--all") opts.all = true;
     else opts.dirs.push(a);
   }
@@ -42,6 +50,7 @@ function fail(lines) {
 }
 
 const opts = parseArgs(process.argv.slice(2));
+const APPS_DIR = opts.appsDir;
 let dirs = [];
 
 if (opts.changedFile) {
@@ -49,7 +58,7 @@ if (opts.changedFile) {
     .split("\n")
     .map((s) => s.trim())
     .filter(Boolean);
-  const { dirs: touched, malformed, unrelated } = submissionDirsFromPaths(paths);
+  const { dirs: touched, malformed, unrelated, protectedHits } = submissionDirsFromPaths(paths);
   if (malformed.length > 0) {
     fail([
       "A submission PR may only add files under apps/<login>_<app>/ (recording.json and optionally a thumbnail image — png, jpg, or webp).",
@@ -68,6 +77,18 @@ if (opts.changedFile) {
   if (touched.length === 0) {
     console.log("No submission files changed — nothing to validate.");
     process.exit(0);
+  }
+  // A submission PR that also rewrites the gallery's own machinery. Refused
+  // outright: the whole point of this check is to be a signal an automated
+  // approver can trust, and it cannot vouch for a bundle while the same PR is
+  // editing the validator, the schema, the workflow or the lockfile around it.
+  if (protectedHits.length > 0) {
+    fail([
+      "A submission PR may not change the gallery's own machinery. Move these to a separate PR:",
+      ...protectedHits.map((p) => `  - ${p}`),
+      "",
+      "(A submission adds only apps/<login>_<app>/recording.json and an optional thumbnail.)",
+    ]);
   }
   if (unrelated.length > 0) {
     console.log(

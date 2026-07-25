@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -61,14 +61,45 @@ test("a maintenance PR touching only unrelated files passes trivially — nothin
 
 test("a PR that ALSO touches unrelated files still strictly validates the apps/ submission it carries", () => {
   const cwd = tempRepo();
-  const result = runCli(cwd, [
-    "README.md",
-    ".github/workflows/validate.yml",
-    "apps/piercypixel_example_app/recording.json",
-  ]);
+  const result = runCli(cwd, ["README.md", "CONTRIBUTING.md", "apps/piercypixel_example_app/recording.json"]);
   assert.equal(result.code, 0);
   assert.match(result.stdout, /valid — "Example App"/);
   assert.match(result.stdout, /also touches files unrelated/);
+});
+
+test("a submission PR that ALSO edits the gallery's machinery hard-fails", () => {
+  // The dangerous shape for an automated approver: a valid-looking bundle with
+  // a change to the validator/workflow/lockfile riding along in the same PR.
+  // Previously this passed — the note about "unrelated" files was the only
+  // trace, and the check still went green.
+  for (const machinery of [
+    ".github/workflows/validate.yml",
+    "scripts/validate-submission.mjs",
+    "schema/app-recording-bundle.mjs",
+    "package-lock.json",
+  ]) {
+    const result = runCli(tempRepo(), ["apps/piercypixel_example_app/recording.json", machinery]);
+    assert.equal(result.code, 1, `${machinery} should fail the check`);
+    assert.match(result.stderr, /may not change the gallery's own machinery/);
+    assert.ok(result.stderr.includes(machinery), `${machinery} should be named in the failure`);
+  }
+});
+
+test("--apps-dir reads submissions from a separate tree, so CI can run the base validator against PR data", () => {
+  // The structural half of the fix: in CI the script runs from the base
+  // checkout while the bundle it reads comes from the PR checkout.
+  const cwd = tempRepo();
+  const dataRoot = mkdtempSync(join(tmpdir(), "apps-data-"));
+  cpSync(join(cwd, "apps"), join(dataRoot, "apps"), { recursive: true });
+  rmSync(join(cwd, "apps"), { recursive: true, force: true });
+
+  // Without the flag the submission isn't where the script is running from.
+  const missing = runCli(cwd, ["apps/piercypixel_example_app/recording.json"]);
+  assert.equal(missing.code, 1);
+
+  const result = runCli(cwd, ["apps/piercypixel_example_app/recording.json"], ["--apps-dir", join(dataRoot, "apps")]);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /valid — "Example App"/);
 });
 
 test("a file smuggled into the submission's own apps/ folder always hard-fails, even alongside unrelated changes", () => {

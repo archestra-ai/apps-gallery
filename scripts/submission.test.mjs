@@ -9,6 +9,7 @@ import {
   slugify,
   expectedDirName,
   submissionDirsFromPaths,
+  isProtectedPath,
   validateSubmission,
   deriveIndexEntry,
 } from "./lib/submission.mjs";
@@ -73,6 +74,53 @@ test("submissionDirsFromPaths separates a smuggled extra file under apps/ from m
   // downgraded to "just unrelated maintenance."
   assert.deepEqual(mixed.malformed, ["apps/octocat_example_app/evil.sh"]);
   assert.deepEqual(mixed.unrelated, ["scripts/validate-submission.mjs"]);
+});
+
+test("isProtectedPath covers the machinery that decides whether a submission is valid", () => {
+  for (const p of [
+    ".github/workflows/validate.yml",
+    "scripts/validate-submission.mjs",
+    "scripts/lib/submission.mjs",
+    "schema/app-recording-bundle.mjs",
+    "package.json",
+    "package-lock.json",
+  ]) {
+    assert.equal(isProtectedPath(p), true, `${p} should be protected`);
+  }
+  // Docs and content are not machinery — a maintenance PR touching only these
+  // must stay mergeable alongside anything else.
+  for (const p of ["README.md", "CONTRIBUTING.md", "categories.json", "logo.svg", "apps/octocat_app/recording.json"]) {
+    assert.equal(isProtectedPath(p), false, `${p} should not be protected`);
+  }
+});
+
+test("submissionDirsFromPaths flags machinery changes that ride along with a submission", () => {
+  // The shape an automated approver must refuse: routine-looking content plus
+  // a quiet edit to the thing that judges it.
+  const smuggled = submissionDirsFromPaths([
+    "apps/octocat_example_app/recording.json",
+    "scripts/validate-submission.mjs",
+    ".github/workflows/validate.yml",
+    "README.md",
+  ]);
+  assert.deepEqual(smuggled.dirs, ["octocat_example_app"]);
+  assert.deepEqual(smuggled.protectedHits, ["scripts/validate-submission.mjs", ".github/workflows/validate.yml"]);
+  // README stays merely "unrelated" — flagged for the log, not for a failure.
+  assert.ok(smuggled.unrelated.includes("README.md"));
+
+  // A clean submission trips nothing.
+  const clean = submissionDirsFromPaths([
+    "apps/octocat_example_app/recording.json",
+    "apps/octocat_example_app/thumbnail.png",
+  ]);
+  assert.deepEqual(clean.protectedHits, []);
+
+  // A pure maintenance PR carries machinery paths and no submission. The
+  // validator exits 0 for it (CODEOWNER review governs), so the bucket being
+  // populated here must not be read as "fail" on its own.
+  const maintenance = submissionDirsFromPaths([".github/workflows/validate.yml", "scripts/build-index.mjs"]);
+  assert.deepEqual(maintenance.dirs, []);
+  assert.equal(maintenance.protectedHits.length, 2);
 });
 
 test("chooseReviewer is deterministic and distributes", () => {

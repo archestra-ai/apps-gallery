@@ -43,6 +43,9 @@ export const ALLOWED_SUBMISSION_PATH = new RegExp(
  * - `unrelated` — paths that aren't under `apps/` at all. On their own these
  *   just mean "not a submission PR" (repo maintenance, docs, workflows);
  *   only `malformed` paths should ever hard-fail the shape check.
+ * - `protectedHits` — the subset of `unrelated` that changes the gallery's own
+ *   machinery (see PROTECTED_PATHS). Harmless in a maintenance PR; never
+ *   acceptable in the same PR as a submission.
  */
 export function submissionDirsFromPaths(paths) {
   const allowed = paths.filter((p) => ALLOWED_SUBMISSION_PATH.test(p));
@@ -50,7 +53,28 @@ export function submissionDirsFromPaths(paths) {
   const malformed = rest.filter((p) => p.startsWith("apps/"));
   const unrelated = rest.filter((p) => !p.startsWith("apps/"));
   const dirs = [...new Set(allowed.map((p) => p.split("/")[1]))];
-  return { dirs, malformed, unrelated };
+  return { dirs, malformed, unrelated, protectedHits: unrelated.filter(isProtectedPath) };
+}
+
+/**
+ * The gallery's own machinery: the validator and the schema it validates
+ * against, the CI that runs them, and the dependency set they import.
+ *
+ * A genuine submission never touches one of these — the share-to-gallery flow
+ * only ever writes `apps/<login>_<app>/`. A PR that carries a submission AND a
+ * change to this list is asking a reviewer to approve new gallery content and
+ * new gallery machinery in a single click, which is exactly the shape an
+ * automated approval must refuse: the content looks routine, the machinery
+ * change rides along unread. Machinery changes belong in their own PR, where
+ * the required CODEOWNER review is about that change and nothing else.
+ *
+ * Deliberately NOT a rule about maintenance PRs on their own — those touch
+ * these paths all the time and are governed by CODEOWNER review.
+ */
+export const PROTECTED_PATHS = [/^\.github\//, /^scripts\//, /^schema\//, /^package(-lock)?\.json$/];
+
+export function isProtectedPath(path) {
+  return PROTECTED_PATHS.some((pattern) => pattern.test(path));
 }
 
 const MAX_BUNDLE_BYTES = 100 * 1024 * 1024; // GitHub contents-API single-file ceiling
