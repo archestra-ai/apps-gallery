@@ -223,6 +223,12 @@ const AppRecordingMessageEditSchema = z
 
 const AppRecordingChatEditsSchema = z
   .object({
+    // Opt in to replaying the AI-enhanced consolidation instead of the captured
+    // chat. The enhancement is packed into the bundle for the gallery either
+    // way — this flag only governs what the PLAYER replays.
+    enhancementEnabled: z.boolean().optional(),
+    // @deprecated Superseded by `enhancementEnabled` once the default flipped to
+    // the original chat. Kept so bundles recorded with it still validate.
     enhancementDisabled: z.boolean().optional(),
     removedMessageIds: z.array(z.string()).max(500).optional(),
     editedMessages: z.array(AppRecordingMessageEditSchema).max(500).optional(),
