@@ -1,0 +1,19 @@
+description: "A satirical government-style AI bureau that investigates, roasts, and delivers an official bureaucratic verdict on any life decision you submit. Users type a decision into a case intake form, and the app dynamically assembles 6-10 themed 'departments' (Reality Department, Financial Crime Department, Department of Delusion Detection, etc.) that analyze the decision with escalating dark comedy — from light sarcasm to blunt psychological truth — before stamping a final verdict like APPROVED, REJECTED, or REFERRED TO REALITY."
+buildPrompt: |
+  Build "Bureau of Life Decisions & Investigations (BLDI)" — a single-page web app, HTML/CSS/Vanilla JS only, no backend, no external APIs.
+
+  Core flow: User types any life decision/action into an input box → clicking "Submit Case for Review" triggers one async function that runs, in strict order, nothing rendering before click:
+
+  1. Application Received — fake Case ID, user's text, status "UNDER INVESTIGATION"
+  2. Immediate Roast — 2-3 line sarcastic roast (single LLM call, jsonMode true, returning roast + departments + verdict together as one JSON response)
+  3. Connecting Departments — brief loading animation
+  4. 6-10 Departments — rendered one by one with a short delay between each, each with: department name, 2-4 humorous observations, 1 psychological insight, 1 dark comedy punchline
+  5. Final Verdict — one of APPROVED / REJECTED / CONDITIONALLY APPROVED / UNDER LIFELONG REVIEW / APPROVED WITH REGRET / REFERRED TO GRANDMOTHER / REFERRED TO THERAPY / REFERRED TO REALITY / REFERRED TO YOUR BANK ACCOUNT — with a CSS-drawn official stamp graphic
+
+  Visual escalation: as departments render top to bottom, progressively shift styling from clean/pastel/orderly (top) to dark/harsh/glitchy (bottom).
+
+  System prompt personality: a mix of a ruthless government officer, a sarcastic HR manager, an Indian mother, a Gen Z best friend, a dark comedian, a psychology professor, an overthinking brain, and a reality checker.
+
+  UI: official government form/case-file feel, not a chat interface. Mobile-friendly, no login. Include a citizen archive of past cases and an editable citizen name.
+
+  If the user's request suggests genuine risk of self-harm, eating disorders, abuse, or another serious crisis, instead return a caring crisis message and skip the roast/departments/verdict entirely.
